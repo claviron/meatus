@@ -1,0 +1,5 @@
+/target/
+/.env
+/Cargo.lock
+/.idea/
+/.DS_Store
