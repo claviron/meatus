@@ -5,7 +5,10 @@ edition = "2024"
 license = "AGPL-3.0-or-later"
 description = "An Orbit-connected VPN service powered by Quincy"
 repository = "https://github.com/claviron/meatus"
-publish = false
+authors = ["ilker Arabaci <iadev09@claviron.dev>"]
+keywords = ["vpn", "quic", "tun", "network", "ipc"]
+categories = ["network-programming", "command-line-utilities"]
+publish = true
 autotests = false
 
 [workspace]
@@ -14,7 +17,7 @@ resolver = "3"
 
 [dependencies]
 scutum-management = { path = "../scutum/crates/management", version = "0.1.0", default-features = false }
-claviron = { path = "../claviron", version = "0.2.0-alpha.20", default-features = false, features = ["server"] }
+claviron = { version = "0.2.0-alpha.21", default-features = false, features = ["server"] }
 # Development checks select the prepared Quincy source with command-local patches.
 quincy = { version = "3.1.0", default-features = false }
 quincy-server = { version = "3.1.0", default-features = false }

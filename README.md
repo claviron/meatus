@@ -17,10 +17,15 @@ configuration and deployment boundaries.
 
 ## Development
 
-The Quincy lifecycle hook and the owner/group Link APIs currently require the
-prepared source checkouts; registry releases alone are not sufficient yet.
-`scripts/check.sh` accepts the Quincy and Orbitive source directories explicitly.
-It uses command-local Cargo patches, not persistent workspace/global overrides.
+Claviron `0.2.0-alpha.21` and Orbitive `0.5.7` provide the Link APIs through
+registry dependencies. The Quincy lifecycle hooks still require the prepared
+Quincy source: published `quincy-server 3.1.0` does not expose the observer or
+host-owned shutdown API. Meatus publication remains blocked until those hooks
+are available in a registry dependency. The `scutum-management 0.1.0` contract
+must also be published first.
+
+`scripts/check.sh` accepts the Quincy source directory explicitly and uses
+command-local patches for Quincy only, not persistent workspace/global overrides.
 
 The executable accepts `--config` with a Meatus TOML file. `quincy_config` points
 to Quincy's ordinary server configuration; keys and user identity files stay
