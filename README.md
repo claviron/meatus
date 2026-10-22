@@ -8,9 +8,10 @@ configured resource, requests a lease from Scutum, renews leases in a batch,
 and releases each binding by ID when its session ends. Firewall authority stays
 with Scutum. A slow or unavailable Scutum does not delay VPN connections.
 
-The duplicate-session policy is explicit: keep the existing session or replace
-it. Replacement releases the old binding before requesting the new one. This
-is not load balancing.
+Shared leases form a round-robin pool at one public IP:port; dedicated leases
+reserve it for one VPN IP. Meatus applies user priorities locally and releases
+obsolete leases before requesting replacements. Scutum sees IPs and leases,
+not usernames. VPN connections never wait for firewall replies.
 
 See [runtime and lease contract](docs/design/RUNTIME_AND_LEASES.md) for lifecycle,
 configuration and deployment boundaries.

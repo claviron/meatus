@@ -4,7 +4,7 @@
 
 Claviron hosts `MeatusService` as a native runnable. Quincy owns QUIC and TUN
 IO. Meatus owns session identity and optional DNAT selection. Scutum owns
-authorization, exclusive resource admission, kernel rules and expiry. No HTTP
+authorization, shared/dedicated resource admission, kernel rules and expiry. No HTTP
 listener or application runner is required. Process supervision is not enabled
 by the current executable.
 
@@ -21,9 +21,24 @@ session list from silently becoming an authoritative grant list.
 ## DNAT capability
 
 Omit `dnat` to run the VPN without firewall integration. When enabled,
-`principals` maps authenticated usernames to Scutum resource identifiers.
-`duplicate_session` is `keep_existing` or `replace_existing`. Meatus selects
-one connection per resource. The losing connection still has a working VPN.
+`principals` maps authenticated usernames to a resource, `dnat_ip`, `mode` and
+integer `priority`. Higher priority wins among connected users of the same
+resource. Equal-priority shared users form a pool; equal-priority policies for
+one resource must agree on mode and DNAT IP. In dedicated mode,
+`duplicate_session` selects `keep_existing` or `replace_existing` among ties.
+Connections not selected for DNAT still have a working VPN.
+
+When a higher-priority dedicated user arrives, Meatus releases its lower-priority
+shared leases before acquisition. When that user leaves, the remaining connected
+users become eligible again. Scutum receives VPN IP, DNAT IP, mode, resource and
+opaque session ID, never username or priority. The resource grant fixes ports,
+protocol and network bounds on the firewall side.
+
+If Scutum rejects acquisition with an occupying VPN IP, Meatus preserves that
+structured result. It releases the returned owned lease only if its current
+selection no longer wants that IP/mode on the resource, then requests again after
+confirmed removal. Foreign lease IDs are not disclosed or released. Scutum never
+silently evicts a target to satisfy an acquisition.
 
 The independent worker coalesces current session state. It releases obsolete
 binding IDs, requests missing bindings, and renews all current IDs in one bounded

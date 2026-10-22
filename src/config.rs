@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+use std::net::IpAddr;
 use std::path::PathBuf;
 
 use anyhow::{Result, ensure};
@@ -62,7 +63,18 @@ pub struct DnatCapability {
     pub renew_interval_ms: u64,
     pub batch_limit: usize,
     pub duplicate_session: DuplicateSession,
-    pub principals: BTreeMap<String, scutum_management::Identity>,
+    pub principals: BTreeMap<String, DnatTarget>,
+}
+
+/// User policy stays local; only IPs, mode and an opaque lease key cross Link.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DnatTarget {
+    pub resource: scutum_management::Identity,
+    pub dnat_ip: IpAddr,
+    pub mode: scutum_management::leases::Mode,
+    /// Higher values take precedence. Equal-priority shared targets form a pool.
+    pub priority: i32,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -157,6 +169,22 @@ impl Config {
                     .all(|p| !p.is_empty() && p.len() <= self.max_name_bytes),
                 "invalid DNAT principal"
             );
+            for target in dnat.principals.values() {
+                ensure!(target.dnat_ip.is_ipv4(), "DNAT requires IPv4");
+                for other in dnat.principals.values() {
+                    if other.resource == target.resource {
+                        ensure!(
+                            other.dnat_ip == target.dnat_ip,
+                            "resource has inconsistent DNAT IPs"
+                        );
+                        ensure!(
+                            other.priority != target.priority
+                                || other.mode == target.mode,
+                            "equal-priority resource policies must use the same mode"
+                        );
+                    }
+                }
+            }
         }
         Ok(())
     }

@@ -6,33 +6,54 @@ use std::time::Duration;
 use anyhow::{Result, anyhow, ensure};
 use claviron::orbit::invoke::Client;
 use scutum_management::Identity;
-use scutum_management::leases::{Command, OPERATION, Reply, Request, Response};
+use scutum_management::leases::{
+    Command, Mode, OPERATION, Reply, Request, Response,
+};
 use tokio_util::sync::CancellationToken;
 
-use crate::config::{DnatCapability, DuplicateSession};
+use crate::config::{DnatCapability, DnatTarget, DuplicateSession};
 use crate::state::{Session, Sessions};
+
+pub struct Selected {
+    pub session: Session,
+    pub target: DnatTarget,
+}
 
 pub fn select(
     sessions: Vec<Session>,
     config: &DnatCapability,
-) -> BTreeMap<Identity, Session> {
-    let mut selected: BTreeMap<Identity, Session> = BTreeMap::new();
+) -> BTreeMap<Identity, Selected> {
+    let mut groups: BTreeMap<Identity, Vec<Selected>> = BTreeMap::new();
     for session in sessions {
-        let Some(resource) = config.principals.get(&session.principal) else {
+        let Some(target) = config.principals.get(&session.principal) else {
             continue;
         };
-        let replace = selected.get(resource).is_none_or(|old| {
-            match config.duplicate_session {
-                DuplicateSession::KeepExisting => {
-                    session.sequence < old.sequence
-                }
+        groups
+            .entry(target.resource.clone())
+            .or_default()
+            .push(Selected { session, target: target.clone() });
+    }
+    let mut selected = BTreeMap::new();
+    for mut group in groups.into_values() {
+        let priority = group
+            .iter()
+            .map(|s| s.target.priority)
+            .max()
+            .expect("nonempty group");
+        group.retain(|s| s.target.priority == priority);
+        if group[0].target.mode == Mode::Dedicated {
+            group.sort_by_key(|s| s.session.sequence);
+            let winner = match config.duplicate_session {
+                DuplicateSession::KeepExisting => group.remove(0),
                 DuplicateSession::ReplaceExisting => {
-                    session.sequence > old.sequence
+                    group.pop().expect("nonempty group")
                 }
+            };
+            selected.insert(winner.session.id.clone(), winner);
+        } else {
+            for item in group {
+                selected.insert(item.session.id.clone(), item);
             }
-        });
-        if replace {
-            selected.insert(resource.clone(), session);
         }
     }
     selected
@@ -81,10 +102,7 @@ pub async fn synchronize(
         let mut index = 0;
         while index < held.len() {
             let current = &held[index];
-            if desired
-                .get(&current.resource)
-                .is_some_and(|s| s.id == current.session)
-            {
+            if desired.contains_key(&current.session) {
                 index += 1;
                 continue;
             }
@@ -111,8 +129,7 @@ pub async fn synchronize(
         if closing {
             return Ok(());
         }
-        let live_ids: BTreeSet<_> =
-            desired.values().map(|s| s.id.clone()).collect();
+        let live_ids: BTreeSet<_> = desired.keys().cloned().collect();
         expired.retain(|id| live_ids.contains(id));
         if renew {
             let ids: Vec<_> = held
@@ -155,11 +172,21 @@ pub async fn synchronize(
                 }
             }
         }
-        for (resource, session) in desired {
+        let desired_endpoints: BTreeSet<_> = desired
+            .values()
+            .map(|s| {
+                (s.target.resource.clone(), s.session.address, s.target.mode)
+            })
+            .collect();
+        for selected in desired.into_values() {
+            let session = selected.session;
+            let policy = selected.target;
             if expired.contains(&session.id)
-                || held
-                    .iter()
-                    .any(|h| h.session == session.id || h.resource == resource)
+                || held.iter().any(|h| {
+                    h.session == session.id
+                        || (policy.mode == Mode::Dedicated
+                            && h.resource == policy.resource)
+                })
             {
                 continue;
             }
@@ -169,9 +196,10 @@ pub async fn synchronize(
                 &mut sequence,
                 Command::Acquire {
                     session: session.id.clone(),
-                    principal: session.principal.clone(),
-                    resource: resource.clone(),
-                    destination: session.address,
+                    resource: policy.resource.clone(),
+                    vpn_ip: session.address,
+                    dnat_ip: policy.dnat_ip,
+                    mode: policy.mode,
                 },
             )
             .await
@@ -193,14 +221,52 @@ pub async fn synchronize(
                     } else {
                         held.push(Held {
                             session: session.id,
-                            resource,
+                            resource: policy.resource,
                             lease,
                         });
                     }
                 }
+                Err(error) => {
+                    if let Some(conflict) = error
+                        .downcast_ref::<scutum_management::Failure>()
+                        .and_then(|e| e.lease_conflict.as_ref())
+                    {
+                        tracing::warn!(vpn_ip = %conflict.vpn_ip, mode = ?conflict.mode,
+                            "DNAT conflicts with an active lease");
+                        // Only our own lease can be released. The local user
+                        // policy, not the firewall, decides whether it is obsolete.
+                        if let Some(lease) = &conflict.owned_lease
+                            && !desired_endpoints.contains(&(
+                                policy.resource.clone(),
+                                conflict.vpn_ip,
+                                conflict.mode,
+                            ))
+                        {
+                            match call(
+                                client,
+                                target,
+                                &mut sequence,
+                                Command::Release { lease: lease.clone() },
+                            )
+                            .await
+                            {
+                                Ok(Reply::Released { removed: true }) => {
+                                    held.retain(|h| h.lease != *lease);
+                                    sessions.changed.notify_one();
+                                }
+                                result => tracing::warn!(
+                                    ?result,
+                                    "conflicting lease release not confirmed"
+                                ),
+                            }
+                        }
+                    } else {
+                        tracing::warn!(%error, "DNAT acquisition not confirmed; VPN remains active");
+                    }
+                }
                 result => tracing::warn!(
                     ?result,
-                    "DNAT acquisition not confirmed; VPN remains active"
+                    "unexpected DNAT acquisition response"
                 ),
             }
         }
@@ -221,9 +287,7 @@ async fn call(
     let bytes = client.call(target, OPERATION, payload).await?;
     let response: Response = serde_json::from_slice(&bytes)?;
     ensure!(response.id == id, "lease response correlation mismatch");
-    response
-        .result
-        .map_err(|e| anyhow!("lease rejected: {:?}: {}", e.code, e.message))
+    response.result.map_err(anyhow::Error::new)
 }
 
 #[cfg(test)]
