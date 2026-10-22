@@ -16,11 +16,10 @@ members = ["."]
 resolver = "3"
 
 [dependencies]
-scutum-management = { path = "../scutum/crates/management", version = "0.1.0", default-features = false }
-claviron = { version = "0.2.0-alpha.21", default-features = false, features = ["server"] }
-# Development checks select the prepared Quincy source with command-local patches.
-quincy = { version = "3.1.0", default-features = false }
-quincy-server = { version = "3.1.0", default-features = false }
+scutum-management = { version = "0.2.0", default-features = false }
+claviron = { version = "0.2.0-alpha.22", default-features = false, features = ["server"] }
+quincy = { package = "quincy-forked", version = "0.0.1", default-features = false }
+quincy-server = { package = "quincy-server-forked", version = "0.0.1", default-features = false }
 anyhow = "1"
 async-trait = "0.1"
 clap = { version = "4", features = ["derive"] }

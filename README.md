@@ -18,15 +18,18 @@ configuration and deployment boundaries.
 
 ## Development
 
-Claviron `0.2.0-alpha.21` and Orbitive `0.5.7` provide the Link APIs through
-registry dependencies. The Quincy lifecycle hooks still require the prepared
-Quincy source: published `quincy-server 3.1.0` does not expose the observer or
-host-owned shutdown API. Meatus publication remains blocked until those hooks
-are available in a registry dependency. The `scutum-management 0.1.0` contract
-must also be published first.
+Claviron `0.2.0-alpha.22` and Orbitive `0.5.8` provide the Link APIs through
+registry dependencies. Meatus selects `quincy-forked 0.0.1` and
+`quincy-server-forked 0.0.1` from [claviron/quincy](https://github.com/claviron/quincy)
+under the existing `quincy` and `quincy-server` dependency aliases. These are
+unofficial AGPL forks based on upstream 3.1.0; the server adds lifecycle
+observers and host-owned shutdown.
 
-`scripts/check.sh` accepts the Quincy source directory explicitly and uses
-command-local patches for Quincy only, not persistent workspace/global overrides.
+Publish the core fork before the server fork. Meatus also requires the
+`scutum-management 0.2.0` contract; publish it before Meatus. Until these
+dependencies exist in the registry, an ordinary registry build cannot resolve
+them. No local patches or source-directory arguments are required after their
+publication. `scripts/check.sh` runs the regular workspace checks.
 
 The executable accepts `--config` with a Meatus TOML file. `quincy_config` points
 to Quincy's ordinary server configuration; keys and user identity files stay
