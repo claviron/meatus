@@ -1,7 +1,3 @@
-<p align="center">
-  <img src="assets/logo.png" alt="Meatus logo" width="300">
-</p>
-
 # Meatus
 
 A native Claviron VPN service powered by Quincy. Meatus runs its own Rust
